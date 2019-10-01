@@ -922,7 +922,7 @@ struct {
     }
 };
 
-static ssize_t mqtt_fixed_header_rule_violation(const struct mqtt_fixed_header *fixed_header) {
+ssize_t mqtt_fixed_header_rule_violation(const struct mqtt_fixed_header *fixed_header) {
     uint8_t control_type;
     uint8_t control_flags;
     uint8_t required_flags;
@@ -1084,11 +1084,13 @@ ssize_t mqtt_pack_connection_request(uint8_t* buf, size_t bufsz,
     remaining_length = 10; /* size of variable header */
 
     if (client_id == NULL) {
-        client_id = "";
+        /* client_id is a mandatory parameter */
+        return MQTT_ERROR_CONNECT_NULL_CLIENT_ID;
+    } else {
+        /* mqtt_string length is strlen + 2 */
+        remaining_length += __mqtt_packed_cstrlen(client_id);
     }
-    /* mqtt_string length is strlen + 2 */
-    remaining_length += __mqtt_packed_cstrlen(client_id);
-
+    
     if (will_topic != NULL) {
         uint8_t temp;
         /* there is a will */
