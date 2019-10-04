@@ -5,49 +5,27 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
+#include <unistd.h>
 #include <errno.h>
 #include <string.h>
 #include <sys/types.h>
-#include <fcntl.h>
-#include <time.h>
-
-#if !defined(WIN32)
-#include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
 #include <arpa/inet.h>
 #include <sys/wait.h>
-#else
-#include <ws2tcpip.h>
-
-/* Some shortcuts to call winapi in a posix-like way */
-#define close(sock)         closesocket(sock)
-#define usleep(usec)        Sleep((usec) / 1000)
-#endif
-
+#include <fcntl.h>
+#include <time.h>
 
 #include <mqtt.h>
 #include "examples/templates/posix_sockets.h"
-
-void make_socket_blocking(int socket)
-{
-#if !defined(WIN32)
-    fcntl(socket, F_SETFL, fcntl(socket, F_GETFL) & ~O_NONBLOCK);
-#else
-    int iMode = 0;
-    ioctlsocket(socket, FIONBIO, &iMode);
-#endif
-}
-
-
 
 const char* addr = "test.mosquitto.org";
 const char* port = "1883";
 
 static void TEST__framing__fixed_header(void** state) {
-    static uint32_t remaining_lengths[] = { 0, 127, 128, 16383, 16384, 2097151, 2097152, 268435455, 268435456 };
-    static ssize_t  actual_lengths[] = { 2, 2, 3, 3, 4, 4, 5, 5, MQTT_ERROR_INVALID_REMAINING_LENGTH };
+static uint32_t remaining_lengths[] = { 0, 127, 128, 16383, 16384, 2097151, 2097152, 268435455, 268435456 };
+static ssize_t  actual_lengths[] = { 2, 2, 3, 3, 4, 4, 5, 5, MQTT_ERROR_INVALID_REMAINING_LENGTH };
     uint8_t correct_buf[1024];
     uint8_t buf[1024];
     struct mqtt_response response;
@@ -71,8 +49,8 @@ static void TEST__framing__fixed_header(void** state) {
             buf[4] = 0x86;
 
         /* another unavoidable lie */
-    rv = mqtt_unpack_fixed_header(&response, buf, sizeof(buf) + remaining_lengths[k]);
-    assert_true(rv == actual_lengths[k]);
+	rv = mqtt_unpack_fixed_header(&response, buf, sizeof(buf) + remaining_lengths[k]);
+	assert_true(rv == actual_lengths[k]);
 
         if(k != 8)
             assert_true(remaining_lengths[k] == response.fixed_header.remaining_length);
@@ -201,6 +179,12 @@ static void TEST__framing__connect(void** state) {
         0, 8, 'u', 's', 'e', 'r', 'n', 'a', 'm', 'e',
         0, 8, 'p', 'a', 's', 's', 'w', 'o', 'r', 'd'
     };
+    const uint8_t correct_bytes_empty_client_id[] = {
+        (MQTT_CONTROL_CONNECT << 4) | 0, 12,
+        0, 4, 'M', 'Q', 'T', 'T', MQTT_PROTOCOL_LEVEL, MQTT_CONNECT_CLEAN_SESSION,
+        0, 120u, 0, 0
+    };
+
     struct mqtt_response response;
     struct mqtt_fixed_header *fixed_header = &response.fixed_header;
 
@@ -221,6 +205,17 @@ static void TEST__framing__connect(void** state) {
 
     /* check that memory is correct */
     assert_true(memcmp(correct_bytes2, buf, sizeof(correct_bytes2)) == 0);
+
+    /* check that the empty client_id is packed correctly */
+    rv = mqtt_pack_connection_request(buf, sizeof(buf), NULL, NULL, NULL, 0, NULL, NULL, MQTT_CONNECT_CLEAN_SESSION, 120u);
+    assert_true(rv == sizeof(correct_bytes_empty_client_id));
+
+    /* check that memory is correct */
+    assert_true(memcmp(correct_bytes_empty_client_id, buf, sizeof(correct_bytes_empty_client_id)) == 0);
+
+    /* Check that empty client_id is rejected without MQTT_CONNECT_CLEAN_SESSION */
+    rv = mqtt_pack_connection_request(buf, sizeof(buf), NULL, NULL, NULL, 0, NULL, NULL, 0, 120u);
+    assert_int_equal(rv, MQTT_ERROR_CLEAN_SESSION_IS_REQUIRED);
 }
 
 static void TEST__framing__publish(void** state) {
@@ -259,7 +254,7 @@ static void TEST__utility__connect_disconnect(void** state) {
     struct mqtt_response mqtt_response;
 
     client.socketfd = open_nb_socket(addr, port);
-    make_socket_blocking(client.socketfd);
+    fcntl(client.socketfd, F_SETFL, fcntl(client.socketfd, F_GETFL) & ~O_NONBLOCK);
     assert_true(client.socketfd != -1);
 
     rv = mqtt_pack_connection_request(buf, sizeof(buf), "liam-123456", NULL, NULL, 0, NULL, NULL, 0, 30);
@@ -461,7 +456,7 @@ static void TEST__utility__ping(void** state) {
     struct mqtt_response mqtt_response;
 
     client.socketfd = open_nb_socket(addr, port);
-    make_socket_blocking(client.socketfd);
+    fcntl(client.socketfd, F_SETFL, fcntl(client.socketfd, F_GETFL) & ~O_NONBLOCK);
     assert_true(client.socketfd != -1);
 
     rv = mqtt_pack_connection_request(buf, sizeof(buf), "this-is-me", NULL, NULL, 0, NULL, NULL, 0, 30);
@@ -614,6 +609,7 @@ static void TEST__api__connect_ping_disconnect(void **unused) {
     struct mqtt_client client;
 
     int sockfd = open_nb_socket(addr, port);
+    fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL) | O_NONBLOCK);
 
     /* initialize */
     mqtt_init(&client, sockfd, sendmem, sizeof(sendmem), recvmem, sizeof(recvmem), publish_callback);
@@ -658,9 +654,11 @@ static void TEST__api__publish_subscribe__single(void **unused) {
     int state = 0;
 
     int sockfd = open_nb_socket(addr, port);
+    fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL) | O_NONBLOCK);
     mqtt_init(&sender, sockfd, sendmem1, sizeof(sendmem1), recvmem1, sizeof(recvmem1), publish_callback);
 
     sockfd = open_nb_socket(addr, port);
+    fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL) | O_NONBLOCK);
     mqtt_init(&receiver, sockfd, sendmem2, sizeof(sendmem2), recvmem2, sizeof(recvmem2), publish_callback);
     receiver.publish_response_callback_state = &state;
 
@@ -721,9 +719,11 @@ static void TEST__api__publish_subscribe__multiple(void **unused) {
 
     /* initialize sender */
     int sockfd = open_nb_socket(addr, port);
+    fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL) | O_NONBLOCK);
     mqtt_init(&sender, sockfd, sendmem1, sizeof(sendmem1), recvmem1, sizeof(recvmem1), publish_callback);
 
     sockfd = open_nb_socket(addr, port);
+    fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL) | O_NONBLOCK);
     mqtt_init(&receiver, sockfd, sendmem2, sizeof(sendmem2), recvmem2, sizeof(recvmem2), publish_callback);
     receiver.publish_response_callback_state = &state;
 
@@ -961,15 +961,6 @@ int main(int argc, const char *argv[]) {
     printf("Staring MQTT-C unit-tests.\n");
     printf("Using broker: \"%s:%s\"\n\n", addr, port);
 
-#if defined(WIN32)
-    WSADATA wsaData;
-    int iResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
-    if (iResult != NO_ERROR) {
-        fprintf(stderr, "Failed to init sockets: %i\n", iResult);
-        return iResult;
-    }
-#endif
-
     printf("[MQTT Packet Serialization/Deserialization Tests]\n");
     const struct CMUnitTest framing_tests[] = {
         cmocka_unit_test(TEST__framing__fixed_header),
@@ -1005,10 +996,6 @@ int main(int argc, const char *argv[]) {
     };
 
     rv |= cmocka_run_group_tests(api_tests, NULL, NULL);
-
-#if defined(WIN32)
-    WSACleanup();
-#endif
 
     return rv;
 }
