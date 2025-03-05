@@ -316,6 +316,7 @@ ssize_t mqtt_pal_sendall(mqtt_pal_socket_handle fd, const void* buf, size_t len,
             if (errno != EAGAIN) {
               return MQTT_ERROR_SOCKET_ERROR;
             }
+            usleep(2000);
         } else {
             sent += (size_t) tmp;
         }
