@@ -118,6 +118,10 @@ enum MQTTErrors mqtt_init(struct mqtt_client *client,
 
     client->socketfd = sockfd;
 
+    /* Indicate we are not connected yet */
+
+    client->event_connect = false;
+
     mqtt_mq_init(&client->mq, sendbuf, sendbufsz);
 
     client->recv_buffer.mem_start = recvbuf;
@@ -151,6 +155,10 @@ void mqtt_init_reconnect(struct mqtt_client *client,
 
     client->socketfd = (mqtt_pal_socket_handle) -1;
 
+    /* Indicate we are not connected yet */
+
+    client->event_connect = false;
+
     mqtt_mq_init(&client->mq, NULL, 0);
 
     client->recv_buffer.mem_start = NULL;
@@ -178,6 +186,10 @@ void mqtt_reinit(struct mqtt_client* client,
 {
     client->error = MQTT_ERROR_CONNECT_NOT_CALLED;
     client->socketfd = socketfd;
+
+    /* Indicate we are not connected yet */
+
+    client->event_connect = false;
 
     mqtt_mq_init(&client->mq, sendbuf, sendbufsz);
 
@@ -592,6 +604,7 @@ ssize_t __mqtt_send(struct mqtt_client *client)
         case MQTT_CONTROL_PUBCOMP:
         case MQTT_CONTROL_DISCONNECT:
             msg->state = MQTT_QUEUED_COMPLETE;
+            client->event_connect = false;
             break;
         case MQTT_CONTROL_PUBLISH:
             inspected = ( MQTT_PUBLISH_QOS_MASK & (msg->start[0]) ) >> 1; /* qos */
@@ -732,6 +745,8 @@ ssize_t __mqtt_recv(struct mqtt_client *client)
                         mqtt_recv_ret = MQTT_ERROR_CONNECTION_REFUSED;
                     }
                     break;
+                } else {
+                    client->event_connect = true;
                 }
                 break;
             case MQTT_CONTROL_PUBLISH:
