@@ -1233,6 +1233,9 @@ struct mqtt_client {
 
     /** @brief The sending message queue. */
     struct mqtt_message_queue mq;
+
+    /** @brief Flag is set on connection event */
+    bool event_connect;
 };
 
 /**
