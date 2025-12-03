@@ -23,6 +23,7 @@ SOFTWARE.
 */
 
 #include <mqtt.h>
+#include <unistd.h>
 
 /** 
  * @file 
