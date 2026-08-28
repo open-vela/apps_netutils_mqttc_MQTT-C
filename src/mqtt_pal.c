@@ -309,7 +309,25 @@ ssize_t mqtt_pal_recvall(mqtt_pal_socket_handle fd, void* buf, size_t bufsz, int
 
 #include <errno.h>
 
+/* VelaGuard contest hook: tagged ESP8266 lesp fds. Unresolved weak
+ * symbols are NULL; POSIX vgmqtt then uses send/recv unchanged.
+ */
+
+int vg_mqtt_pal_try_sendall(mqtt_pal_socket_handle fd, const void *buf,
+                            size_t len, int flags, ssize_t *out)
+    __attribute__((weak));
+int vg_mqtt_pal_try_recvall(mqtt_pal_socket_handle fd, void *buf,
+                            size_t bufsz, int flags, ssize_t *out)
+    __attribute__((weak));
+
 ssize_t mqtt_pal_sendall(mqtt_pal_socket_handle fd, const void* buf, size_t len, int flags) {
+    ssize_t hooked;
+
+    if (vg_mqtt_pal_try_sendall &&
+        vg_mqtt_pal_try_sendall(fd, buf, len, flags, &hooked) == 0) {
+        return hooked;
+    }
+
     size_t sent = 0;
     while(sent < len) {
         ssize_t tmp = send(fd, buf + sent, len - sent, flags);
@@ -326,8 +344,15 @@ ssize_t mqtt_pal_sendall(mqtt_pal_socket_handle fd, const void* buf, size_t len,
 }
 
 ssize_t mqtt_pal_recvall(mqtt_pal_socket_handle fd, void* buf, size_t bufsz, int flags) {
+    ssize_t hooked;
     const void *const start = buf;
     ssize_t rv;
+
+    if (vg_mqtt_pal_try_recvall &&
+        vg_mqtt_pal_try_recvall(fd, buf, bufsz, flags, &hooked) == 0) {
+        return hooked;
+    }
+
     do {
         rv = recv(fd, buf, bufsz, flags);
         if (rv > 0) {
